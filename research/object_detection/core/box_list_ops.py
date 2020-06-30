@@ -23,7 +23,12 @@ Example box operations that are supported:
 Whenever box_list_ops functions output a BoxList, the fields of the incoming
 BoxList are retained unless documented otherwise.
 """
-import tensorflow as tf
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+from six.moves import range
+import tensorflow.compat.v1 as tf
 
 from object_detection.core import box_list
 from object_detection.utils import ops
@@ -97,6 +102,31 @@ def scale(boxlist, y_scale, x_scale, scope=None):
     x_max = x_scale * x_max
     scaled_boxlist = box_list.BoxList(
         tf.concat([y_min, x_min, y_max, x_max], 1))
+    return _copy_extra_fields(scaled_boxlist, boxlist)
+
+
+def scale_height_width(boxlist, y_scale, x_scale, scope=None):
+  """Scale the height and width of boxes, leaving centers unchanged.
+
+  Args:
+    boxlist: BoxList holding N boxes
+    y_scale: (float) scalar tensor
+    x_scale: (float) scalar tensor
+    scope: name scope.
+
+  Returns:
+    boxlist: BoxList holding N boxes
+  """
+  with tf.name_scope(scope, 'ScaleHeightWidth'):
+    y_scale = tf.cast(y_scale, tf.float32)
+    x_scale = tf.cast(x_scale, tf.float32)
+    yc, xc, height_orig, width_orig = boxlist.get_center_coordinates_and_sizes()
+    y_min = yc - 0.5 * y_scale * height_orig
+    y_max = yc + 0.5 * y_scale * height_orig
+    x_min = xc - 0.5 * x_scale * width_orig
+    x_max = xc + 0.5 * x_scale * width_orig
+    scaled_boxlist = box_list.BoxList(
+        tf.stack([y_min, x_min, y_max, x_max], 1))
     return _copy_extra_fields(scaled_boxlist, boxlist)
 
 
@@ -339,7 +369,7 @@ def prune_non_overlapping_boxes(
     ioa_ = ioa(boxlist2, boxlist1)  # [M, N] tensor
     ioa_ = tf.reduce_max(ioa_, reduction_indices=[0])  # [N] tensor
     keep_bool = tf.greater_equal(ioa_, tf.constant(min_overlap))
-    keep_inds = tf.squeeze(tf.where(keep_bool), squeeze_dims=[1])
+    keep_inds = tf.squeeze(tf.where(keep_bool), axis=[1])
     new_boxlist1 = gather(boxlist1, keep_inds)
     return new_boxlist1, keep_inds
 
@@ -457,7 +487,7 @@ def boolean_mask(boxlist, indicator, fields=None, scope=None,
     if use_static_shapes:
       if not (indicator_sum and isinstance(indicator_sum, int)):
         raise ValueError('`indicator_sum` must be a of type int')
-      selected_positions = tf.to_float(indicator)
+      selected_positions = tf.cast(indicator, dtype=tf.float32)
       indexed_positions = tf.cast(
           tf.multiply(
               tf.cumsum(selected_positions), selected_positions),
@@ -466,7 +496,7 @@ def boolean_mask(boxlist, indicator, fields=None, scope=None,
           indexed_positions - 1, indicator_sum, dtype=tf.float32)
       sampled_indices = tf.cast(
           tf.tensordot(
-              tf.to_float(tf.range(tf.shape(indicator)[0])),
+              tf.cast(tf.range(tf.shape(indicator)[0]), dtype=tf.float32),
               one_hot_selector,
               axes=[0, 0]),
           dtype=tf.int32)
@@ -962,7 +992,7 @@ def box_voting(selected_boxes, pool_boxes, iou_thresh=0.5):
     raise ValueError('pool_boxes must have a \'scores\' field')
 
   iou_ = iou(selected_boxes, pool_boxes)
-  match_indicator = tf.to_float(tf.greater(iou_, iou_thresh))
+  match_indicator = tf.cast(tf.greater(iou_, iou_thresh), dtype=tf.float32)
   num_matches = tf.reduce_sum(match_indicator, 1)
   # TODO(kbanoop): Handle the case where some boxes in selected_boxes do not
   # match to any boxes in pool_boxes. For such boxes without any matches, we
